@@ -1,0 +1,5 @@
+# Ignore files that are in the data directory
+data/*
+Model/*
+__pycache__/*
+resnet9_cifar100.pth
