@@ -1,53 +1,66 @@
 import os
-import numpy as np
+import torch
 import torchvision.transforms as tt
-import torchvision
 from torch.utils.data import DataLoader
-from config import Config
+from torchvision.datasets import CIFAR100
 
-cfg = Config()
+def get_default_device():
+    """Pick GPU if available, else CPU"""
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    else:
+        return torch.device('cpu')
+    
+def to_device(data, device):
+    """Move tensor(s) to chosen device"""
+    if isinstance(data, (list, tuple)):
+        return [to_device(x, device) for x in data]
+    return data.to(device, non_blocking=True)
 
-# Paths to check if data is already downloaded
-train_data_path = './data/cifar-100-python/train'
-test_data_path = './data/cifar-100-python/test'
+class DeviceDataLoader():
+    """Wrap a dataloader to move data to a device"""
+    def __init__(self, dl, device):
+        self.dl = dl
+        self.device = device
+        
+    def __iter__(self):
+        """Yield a batch of data after moving it to device"""
+        for b in self.dl: 
+            yield to_device(b, self.device)
 
-# Function to check if dataset is already downloaded
-def is_data_downloaded(data_path):
-    return os.path.exists(data_path)
+    def __len__(self):
+        """Number of batches"""
+        return len(self.dl)
 
-# Download the dataset to calculate mean and std
-if not is_data_downloaded(train_data_path):
-    train_data = torchvision.datasets.CIFAR100('./data', train=True, download=True)
-else:
-    train_data = torchvision.datasets.CIFAR100('./data', train=True, download=False)
+# Helper function to download the dataset only once
+def download_dataset(root='./data'):
+    if not os.path.exists(os.path.join(root, 'cifar-100-python')):
+        print("Downloading CIFAR-100 dataset...")
+        CIFAR100(root=root, train=True, download=True)
+        CIFAR100(root=root, train=False, download=True)
 
-# Calculate mean and std for normalization
-x = np.concatenate([np.asarray(train_data[i][0]) for i in range(len(train_data))])
-mean = np.mean(x, axis=(0, 1)) / 255
-std = np.std(x, axis=(0, 1)) / 255
-mean = mean.tolist()
-std = std.tolist()
+# Download dataset if not already done
+download_dataset()
 
-# Define transformations
-transform_train = tt.Compose([
+# CIFAR-100 dataset
+train_transforms = tt.Compose([
     tt.RandomCrop(32, padding=4, padding_mode='reflect'),
     tt.RandomHorizontalFlip(),
     tt.ToTensor(),
-    tt.Normalize(mean, std, inplace=True)
+    tt.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
 ])
-transform_test = tt.Compose([tt.ToTensor(), tt.Normalize(mean, std)])
 
-# Load datasets
-if not is_data_downloaded(train_data_path):
-    trainset = torchvision.datasets.CIFAR100('./data', train=True, download=True, transform=transform_train)
-else:
-    trainset = torchvision.datasets.CIFAR100('./data', train=True, download=False, transform=transform_train)
+test_transforms = tt.Compose([
+    tt.ToTensor(),
+    tt.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
+])
 
-if not is_data_downloaded(test_data_path):
-    testset = torchvision.datasets.CIFAR100('./data', train=False, download=True, transform=transform_test)
-else:
-    testset = torchvision.datasets.CIFAR100('./data', train=False, download=False, transform=transform_test)
+trainset = CIFAR100(root='./data', train=True, download=False, transform=train_transforms)
+testset = CIFAR100(root='./data', train=False, download=False, transform=test_transforms)
 
-# Create data loaders
-trainloader = DataLoader(trainset, cfg.batch_size, shuffle=True, num_workers=2, pin_memory=True)
-testloader = DataLoader(testset, cfg.batch_size * 2, pin_memory=True, num_workers=2)
+trainloader = DataLoader(trainset, batch_size=400, shuffle=True, num_workers=2, pin_memory=True)
+testloader = DataLoader(testset, batch_size=800, num_workers=2, pin_memory=True)
+
+device = get_default_device()
+trainloader = DeviceDataLoader(trainloader, device)
+testloader = DeviceDataLoader(testloader, device)

@@ -1,16 +1,49 @@
-import torch
-from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, f1_score, recall_score, precision_recall_fscore_support
-import pandas as pd
-import matplotlib.pyplot as plt
-from model import ResNet9
-from config import Config
-from data_loader import testloader, trainloader
-from train import to_device, evaluate
 import time
+import torch
+from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support, accuracy_score, f1_score, recall_score
+import matplotlib.pyplot as plt
+import pandas as pd
+from train import model, device, testloader, trainloader, evaluate
 
-cfg = Config()
+def evaluate_model():
+    model_path = 'group22_pretrained_model.h5'
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
 
-device = cfg.device
+    # Evaluate on test set
+    current_time = time.time()
+    result = evaluate(model, testloader)
+    print("Evaluation time: {:.2f} s".format(time.time() - current_time))
+    
+    y_test, y_pred = test_label_predictions(model, device, testloader)
+    cm = confusion_matrix(y_test, y_pred)
+    cr = classification_report(y_test, y_pred, output_dict=True)
+    fs = f1_score(y_test, y_pred, average='weighted')
+    rs = recall_score(y_test, y_pred, average='weighted')
+    accuracy = accuracy_score(y_test, y_pred)
+    print('Confusion matrix:')
+    print(cm)
+    print(classification_report(y_test, y_pred))
+    print('F1 score: %f' % fs)
+    print('Recall score: %f' % rs)
+    print('Accuracy score: %f' % accuracy)
+
+    # Save classification report into CSV
+    report = classification_report(y_test, y_pred, output_dict=True)
+    df = pd.DataFrame(report).transpose()
+    df.to_csv('classification_report.csv', index=False)
+
+    # Plot and save classification report
+    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred)
+    plot_classification(precision, recall, f1)
+
+    # Plot and save confusion matrix
+    plot_confusion_matrix(cm)
+
+    # Evaluate on train set for training accuracy
+    y_train, y_pred_train = test_label_predictions(model, device, trainloader)
+    train_accuracy = accuracy_score(y_train, y_pred_train)
+    print('Train accuracy: %f' % train_accuracy)
 
 def test_label_predictions(model, device, test_loader):
     model.eval()
@@ -57,49 +90,5 @@ def plot_confusion_matrix(cm):
     plt.savefig("confusion_matrix.pdf")
     plt.show()
 
-def evaluate_model():
-    # Initialize the model
-    model = ResNet9(3, 100)
-    model.load_state_dict(torch.load('resnet9_cifar100.pth'))
-    model = to_device(model, device)
-
-    # Evaluate the model
-    current_time = time.time()
-    result = evaluate(model, testloader)
-    print('Evaluation time: {:.2f} s'.format(time.time() - current_time))
-
-    # Generate testing accuracy, predicted label, confusion matrix, and table for classification report
-    y_test, y_pred = test_label_predictions(model, device, testloader)
-    cm = confusion_matrix(y_test, y_pred)
-    cr = classification_report(y_test, y_pred)
-    fs = f1_score(y_test, y_pred, average='weighted')
-    rs = recall_score(y_test, y_pred, average='weighted')
-    accuracy = accuracy_score(y_test, y_pred)
-    print('Confusion matrix:')
-    print(cm)
-    print(cr)
-    print('F1 score: %f' % fs)
-    print('Recall score: %f' % rs)
-    print('Accuracy score: %f' % accuracy)
-
-    # Save classification report to CSV
-    report = classification_report(y_test, y_pred, output_dict=True)
-    df = pd.DataFrame(report).transpose()
-    df.to_csv('classification_report.csv', index=False)
-
-    # Obtain training accuracy
-    y_train, y_pred_train = test_label_predictions(model, device, trainloader)
-    train_accuracy = accuracy_score(y_train, y_pred_train)
-    print('Train accuracy: %f' % train_accuracy)
-
-    # Plot and save confusion matrix
-    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred)
-    plot_classification(precision, recall, f1)
-
-    # Plot confusion matrix
-    plot_confusion_matrix(cm)
-
-if __name__ == "__main__":
-    import multiprocessing
-    multiprocessing.freeze_support()
+if __name__ == '__main__':
     evaluate_model()
