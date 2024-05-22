@@ -3,3 +3,9 @@ data/*
 Model/*
 __pycache__/*
 resnet9_cifar100.pth
+group22_pretrained_model.h5
+classification.pdf
+classification_report.csv
+conformal_predictions.png
+confusion_matrix.pdf
+conformal_classification/__pycache__

@@ -7,22 +7,15 @@ import numpy as np
 import random
 import sys
 import os
-import numpy as np
-import torch
+import pickle
+from PIL import Image
 import torchvision
-import torch.nn as nn
-import torch.optim as optim
-import torch.utils.data as tdata
-from tqdm import tqdm
-from conformal_classification.conformal import ConformalModel
-from conformal_classification.utils import validate, get_logits_targets, sort_sum
-# Insert the path to the conformal_classification directory
-sys.path.insert(1, os.path.join(sys.path[0], './conformal_classification/'))
 
 from conformal_classification.conformal import ConformalModel
-from conformal_classification.utils import validate 
-# from conformal import ConformalModel
-# from utils import validate
+from conformal_classification.utils import validate, get_logits_targets, sort_sum
+
+# Insert the path to the conformal_classification directory
+sys.path.insert(1, os.path.join(sys.path[0], './conformal_classification/'))
 
 # Import your ResNet9 model
 from model import ResNet9
@@ -44,13 +37,47 @@ transform = transforms.Compose([
 
 batch_size = 128
 
-# Load CIFAR-100 dataset
-cifar100_train = datasets.CIFAR100(root='./data', train=True, download=True, transform=transform)
-cifar100_test = datasets.CIFAR100(root='./data', train=False, download=True, transform=transform)
+# Custom dataset class to handle loading of split datasets
+class CIFAR100SplitDataset(datasets.VisionDataset):
+    classes = [
+        'apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle', 'bicycle', 'bottle',
+        'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel', 'can', 'castle', 'caterpillar', 'cattle',
+        'chair', 'chimpanzee', 'clock', 'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur',
+        'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster', 'house', 'kangaroo', 'keyboard',
+        'lamp', 'lawn_mower', 'leopard', 'lion', 'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain',
+        'mouse', 'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear', 'pickup_truck', 'pine_tree',
+        'plain', 'plate', 'poppy', 'porcupine', 'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket',
+        'rose', 'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake', 'spider',
+        'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table', 'tank', 'telephone', 'television', 'tiger', 'tractor',
+        'train', 'trout', 'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman', 'worm'
+    ]
+    
+    def __init__(self, file_path, transform=None):
+        super(CIFAR100SplitDataset, self).__init__(root=file_path, transform=transform)
+        with open(file_path, 'rb') as f:
+            batch = pickle.load(f, encoding='bytes')
+            self.data = batch[b'data'] if b'data' in batch else batch['data']
+            self.labels = batch[b'fine_labels'] if b'fine_labels' in batch else batch['fine_labels']
 
-# Split the training set into a conformal calibration set and a training set
-num_calib = 5000
-cifar100_calib, cifar100_train = random_split(cifar100_train, [num_calib, len(cifar100_train) - num_calib])
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        img = self.data[idx].reshape(3, 32, 32).transpose(1, 2, 0).astype(np.uint8)
+        img = Image.fromarray(img)
+        if self.transform:
+            img = self.transform(img)
+        return img, self.labels[idx]
+
+# Load datasets
+data_dir = './data/cifar-100-python/'
+train_path = os.path.join(data_dir, 'train')
+test_path = os.path.join(data_dir, 'test')
+calibration_path = os.path.join(data_dir, 'calibration')
+
+cifar100_train = CIFAR100SplitDataset(train_path, transform=transform)
+cifar100_test = CIFAR100SplitDataset(test_path, transform=transform)
+cifar100_calib = CIFAR100SplitDataset(calibration_path, transform=transform)
 
 # Initialize data loaders
 calib_loader = DataLoader(cifar100_calib, batch_size=batch_size, shuffle=True, pin_memory=True)
@@ -64,10 +91,11 @@ model = model.cuda()
 model.eval()
 
 # Conformalize the model
-cmodel = ConformalModel(model, calib_loader, alpha=0.1, lamda_criterion='size')
+num_classes = len(cifar100_calib.classes)  # Get the number of classes
+cmodel = ConformalModel(model, calib_loader, alpha=0.1, num_classes=num_classes)
 
 # Validate the coverage of the conformal model on the test set
-top1, top5, coverage, size = validate(test_loader, cmodel, print_bool=True)
+top1, top5, coverage, size = validate(calib_loader, cmodel, print_bool=True)
 
 # Plot example predictions
 num_images = 8
