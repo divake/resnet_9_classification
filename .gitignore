@@ -9,3 +9,4 @@ classification_report.csv
 conformal_predictions.png
 confusion_matrix.pdf
 conformal_classification/__pycache__
+add_noise.py

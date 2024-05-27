@@ -1,6 +1,6 @@
 import torch
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 import torchvision.datasets as datasets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -92,27 +92,39 @@ model.eval()
 
 # Conformalize the model
 num_classes = len(cifar100_calib.classes)  # Get the number of classes
-cmodel = ConformalModel(model, calib_loader, alpha=0.1, num_classes=num_classes)
+cmodel = ConformalModel(model, test_loader, alpha=0.1, num_classes=num_classes)
 
-# Validate the coverage of the conformal model on the test set
-top1, top5, coverage, size = validate(calib_loader, cmodel, print_bool=True)
+# Validate the coverage of the conformal model on the calibration set
+top1, top5, coverage, size = validate(test_loader, cmodel, print_bool=True)
+
+# Fixed indices for the specific images you want
+fixed_indices = [21, 81, 62, 13, 50, 60, 75, 19]  # Replace with actual indices
+
+# Use these fixed indices to create the subset
+explore_data = Subset(cifar100_calib, fixed_indices)
+
+# Print indices of the selected images
+print(f"Selected indices: {fixed_indices}")
 
 # Plot example predictions
 num_images = 8
-explore_data, _ = random_split(cifar100_test, [num_images, len(cifar100_test) - num_images])
 
 mosaiclist = []
 sets = []
 labels = []
 
-for data in explore_data:
+for i, data in enumerate(explore_data):
     img, label = data
     scores, set_pred = cmodel(img.unsqueeze(0).cuda())
+    probabilities = torch.softmax(scores, dim=1).squeeze(0)  # Get probabilities
     unnormalized_img = (img * torch.tensor([0.2673, 0.2564, 0.2762]).view(-1, 1, 1)) + torch.tensor([0.5071, 0.4865, 0.4409]).view(-1, 1, 1)
     
-    set_pred = [cifar100_test.classes[s] for s in set_pred[0]]
-    sets.append(set_pred)
-    labels.append(cifar100_test.classes[label])
+    # Filter out classes with 0.0 probability and sort by probability
+    set_pred_with_probs = [(cifar100_calib.classes[s], round(probabilities[s].item(), 2)) for s in set_pred[0] if round(probabilities[s].item(), 2) > 0.0]
+    sorted_set_pred_with_probs = sorted(set_pred_with_probs, key=lambda item: item[1], reverse=True)  # Sort by probability
+    
+    sets.append(sorted_set_pred_with_probs)
+    labels.append(cifar100_calib.classes[label])
     mosaiclist.append(unnormalized_img)
 
 grid = torchvision.utils.make_grid(mosaiclist)
@@ -123,7 +135,12 @@ ax.get_xaxis().set_visible(False)
 ax.get_yaxis().set_visible(False)
 plt.tight_layout()
 
+# Calculate the size of the filtered RAPS sets
+filtered_size = sum(len(s) for s in sets) / num_images
+
 for i in range(len(mosaiclist)):
-    print(f"Image {i} has label '{labels[i]}', and the predictive set is {sets[i]}.")
+    print(f"Image {i} has label '{labels[i]}', and the predictive set with probabilities is {sets[i]}.")
+
+print(f"Filtered Size@RAPS: {filtered_size:.3f}")
 
 plt.show()
