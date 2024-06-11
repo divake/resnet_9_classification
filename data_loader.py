@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from PIL import Image
 import torchvision.transforms as tt
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import CIFAR100
 
 def get_default_device():
@@ -38,7 +38,6 @@ class DeviceDataLoader():
 # Custom dataset class to handle loading of split datasets
 class CIFAR100SplitDataset(Dataset):
     def __init__(self, file_path, transform=None):
-        self.file_path = file_path
         with open(file_path, 'rb') as f:
             batch = pickle.load(f, encoding='bytes')
             self.data = batch[b'data'] if b'data' in batch else batch['data']
@@ -56,19 +55,7 @@ class CIFAR100SplitDataset(Dataset):
             img = self.transform(img)
         return img, label
 
-# Custom transform to add Gaussian noise
-class AddGaussianNoise(object):
-    def __init__(self, mean=0.0, std=0.1):
-        self.mean = mean
-        self.std = std
-        
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-    
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-# CIFAR-100 dataset with Gaussian noise
+# CIFAR-100 dataset
 train_transforms = tt.Compose([
     tt.RandomCrop(32, padding=4, padding_mode='reflect'),
     tt.RandomHorizontalFlip(),
@@ -81,14 +68,6 @@ test_transforms = tt.Compose([
     tt.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762))
 ])
 
-def get_noisy_subset(file_path, noise_std, subset_indices):
-    noisy_transform = tt.Compose([
-        tt.ToTensor(),
-        tt.Normalize((0.5071, 0.4865, 0.4409), (0.2673, 0.2564, 0.2762)),
-        AddGaussianNoise(0.0, noise_std)
-    ])
-    return Subset(CIFAR100SplitDataset(file_path, transform=noisy_transform), subset_indices)
-
 # Hardcoded paths for the datasets
 data_dir = './data/cifar-100-python/'
 train_path = os.path.join(data_dir, 'train')
@@ -100,25 +79,10 @@ trainset = CIFAR100SplitDataset(train_path, transform=train_transforms)
 testset = CIFAR100SplitDataset(test_path, transform=test_transforms)
 calibrationset = CIFAR100SplitDataset(calibration_path, transform=test_transforms)
 
-# Create subsets with different noise levels
-noise_levels = [0.0, 0.05, 0.1, 0.15, 0.2]
-train_indices = np.random.permutation(len(trainset))
-test_indices = np.random.permutation(len(testset))
-calib_indices = np.random.permutation(len(calibrationset))
-
-train_subsets = [get_noisy_subset(train_path, noise_std, train_indices[i::len(noise_levels)]) for i, noise_std in enumerate(noise_levels)]
-test_subsets = [get_noisy_subset(test_path, noise_std, test_indices[i::len(noise_levels)]) for i, noise_std in enumerate(noise_levels)]
-calib_subsets = [get_noisy_subset(calibration_path, noise_std, calib_indices[i::len(noise_levels)]) for i, noise_std in enumerate(noise_levels)]
-
-# Combine subsets
-combined_trainset = torch.utils.data.ConcatDataset(train_subsets)
-combined_testset = torch.utils.data.ConcatDataset(test_subsets)
-combined_calibrationset = torch.utils.data.ConcatDataset(calib_subsets)
-
 # Create data loaders
-trainloader = DataLoader(combined_trainset, batch_size=400, shuffle=True, num_workers=2, pin_memory=True)
-testloader = DataLoader(combined_testset, batch_size=800, num_workers=2, pin_memory=True)
-calib_loader = DataLoader(combined_calibrationset, batch_size=800, shuffle=True, num_workers=2, pin_memory=True)
+trainloader = DataLoader(trainset, batch_size=400, shuffle=True, num_workers=2, pin_memory=True)
+testloader = DataLoader(testset, batch_size=800, num_workers=2, pin_memory=True)
+calib_loader = DataLoader(calibrationset, batch_size=800, shuffle=True, num_workers=2, pin_memory=True)
 
 # Move data loaders to device
 device = get_default_device()
