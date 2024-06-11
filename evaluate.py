@@ -1,51 +1,12 @@
-import time
 import torch
-from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support, accuracy_score, f1_score, recall_score
+import torch.nn as nn
+from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
-import pandas as pd
-from train import model, device, testloader, trainloader, evaluate
+import time
+from data_loader import get_default_device, to_device, testloader
+from model import ResNet9
 
-def evaluate_model():
-    model_path = 'group22_pretrained_model.h5'
-    model.load_state_dict(torch.load(model_path))
-    model.eval()
-
-    # Evaluate on test set
-    current_time = time.time()
-    result = evaluate(model, testloader)
-    print("Evaluation time: {:.2f} s".format(time.time() - current_time))
-    
-    y_test, y_pred = test_label_predictions(model, device, testloader)
-    cm = confusion_matrix(y_test, y_pred)
-    cr = classification_report(y_test, y_pred, output_dict=True)
-    fs = f1_score(y_test, y_pred, average='weighted')
-    rs = recall_score(y_test, y_pred, average='weighted')
-    accuracy = accuracy_score(y_test, y_pred)
-    print('Confusion matrix:')
-    print(cm)
-    print(classification_report(y_test, y_pred))
-    print('F1 score: %f' % fs)
-    print('Recall score: %f' % rs)
-    print('Accuracy score: %f' % accuracy)
-
-    # Save classification report into CSV
-    report = classification_report(y_test, y_pred, output_dict=True)
-    df = pd.DataFrame(report).transpose()
-    df.to_csv('classification_report.csv', index=False)
-
-    # Plot and save classification report
-    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred)
-    plot_classification(precision, recall, f1)
-
-    # Plot and save confusion matrix
-    plot_confusion_matrix(cm)
-
-    # Evaluate on train set for training accuracy
-    y_train, y_pred_train = test_label_predictions(model, device, trainloader)
-    train_accuracy = accuracy_score(y_train, y_pred_train)
-    print('Train accuracy: %f' % train_accuracy)
-
-def test_label_predictions(model, device, test_loader):
+def test_label_predictions(model, device, test_loader, rep_size=None):
     model.eval()
     actuals = []
     predictions = []
@@ -53,42 +14,47 @@ def test_label_predictions(model, device, test_loader):
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
+            if isinstance(output, tuple) and rep_size is not None:
+                output = output[rep_size]  # Use the specified representation size for evaluation
             prediction = output.argmax(dim=1, keepdim=True)
             actuals.extend(target.view_as(prediction))
             predictions.extend(prediction)
     return [i.item() for i in actuals], [i.item() for i in predictions]
 
-def plot_classification(precision, recall, f1_score):
-    plt.rcParams['font.size'] = 12
-    plt.rc('axes', linewidth=1.75)
-    marker_size = 8
-    figsize = 6
-    plt.figure(figsize=(1.4 * figsize, figsize))
-    plt.subplot(3, 1, 1)
-    plt.plot(precision, 'o', markersize=marker_size)
-    plt.ylabel('Precision', fontsize=14)
-    plt.xticks([])
-    plt.subplot(3, 1, 2)
-    plt.plot(recall, 'o', markersize=marker_size)
-    plt.ylabel('Recall', fontsize=14)
-    plt.xticks([])
-    plt.subplot(3, 1, 3)
-    plt.plot(f1_score, 'o', markersize=marker_size)
-    plt.ylabel('F1-score', fontsize=14)
-    plt.xlabel('Class', fontsize=14)
-    plt.subplots_adjust(hspace=0.001)
-    plt.tight_layout()
-    plt.savefig("classification.pdf")
-
-def plot_confusion_matrix(cm):
+def plot_accuracies(sizes, accuracies):
     plt.figure()
-    plt.imshow(cm, interpolation='nearest', cmap=plt.get_cmap('Blues'))
-    plt.colorbar()
-    plt.ylabel('True label', fontsize=14)
-    plt.xlabel('Predicted label', fontsize=14)
-    plt.tight_layout()
-    plt.savefig("confusion_matrix.pdf")
+    plt.plot(sizes, [accuracies[size] for size in sizes], marker='o')
+    plt.xlabel('Representation Size')
+    plt.ylabel('Top-1 Accuracy (%)')
+    plt.title('Top-1 Accuracy for Different Representation Sizes')
+    plt.grid(True, which="both", linestyle='--', linewidth=0.5)
+    plt.xscale('log', base=2)  # Use a logarithmic scale with base 2 for the x-axis
+    plt.xticks(sizes, [str(size) for size in sizes])  # Set x-ticks to be exactly the representation sizes
+    plt.savefig("representation_accuracies.pdf")
     plt.show()
+
+def evaluate_model():
+    device = get_default_device()
+    nesting_list = [1028, 512, 256, 128, 64, 32, 16, 8]
+    model = ResNet9(3, 100, nesting_list=nesting_list)
+    model = to_device(model, device)
+
+    model_path = 'resnet9_mrl.pth'
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+
+    # Evaluate on test set for each representation size
+    accuracies = {}
+    
+    for i, size in enumerate(nesting_list):
+        current_time = time.time()
+        y_test, y_pred = test_label_predictions(model, device, testloader, rep_size=i)
+        accuracy = accuracy_score(y_test, y_pred)
+        accuracies[size] = accuracy
+        print(f"Representation Size: {size}, Top-1 Accuracy: {accuracy:.4f}, Evaluation time: {time.time() - current_time:.2f} s")
+
+    # Plot accuracies for different representation sizes
+    plot_accuracies(nesting_list, accuracies)
 
 if __name__ == '__main__':
     evaluate_model()

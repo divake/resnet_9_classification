@@ -10,3 +10,6 @@ conformal_predictions.png
 confusion_matrix.pdf
 conformal_classification/__pycache__
 add_noise.py
+debugger_test.py
+representation_accuracies.pdf
+resnet9_mrl.pth
